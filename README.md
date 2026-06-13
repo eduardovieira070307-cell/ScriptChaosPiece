@@ -1,6 +1,6 @@
 -- ==============================================================================
--- [PREMIUM CHEST FARM] - VERSÃO MULTI-ILHAS (STREAMING BYPASS)
--- Compatível com VOLT. Rotação automática pelas 8 ilhas com puxador local.
+-- [PREMIUM CHEST FARM] - VERSÃO COORDENADAS EXATAS & COOLDOWN
+-- Totalmente compatível com VOLT. Rotação controlada por tempo mínimo (8s).
 -- ==============================================================================
 
 local Players = game:GetService("Players")
@@ -12,16 +12,16 @@ local LocalPlayer = Players.LocalPlayer
 local ChestFarmActive = false
 local BlacklistedChests = {}
 
--- Lista exata das ilhas fornecidas
-local IslandNames = {
-    "Starter",
-    "Forest",
-    "Rocky",
-    "Desert",
-    "Ice",
-    "Sky kingdom",
-    "Marineford",
-    "Business district"
+-- Coordenadas exatas fornecidas para cada uma das 8 ilhas
+local IslandPositions = {
+    CFrame.new(-189.54974365234375, 13.674964904785156, -609.3209228515625), -- 1. Starter
+    CFrame.new(-856.2052612304688, 11.592161178588867, 662.95654296875),    -- 2. Forest
+    CFrame.new(1372.12255859375, 3.61570405960083, 1822.9290771484375),     -- 3. Rocky
+    CFrame.new(3403.5087890625, 16.919490814208984, 402.89752197265625),    -- 4. Desert
+    CFrame.new(-397.72119140625, 36.68341064453125, -3268.46484375),        -- 5. Ice
+    CFrame.new(-273.8543395996094, 1582.9114990234375, 2272.558349609375),  -- 6. Sky kingdom
+    CFrame.new(2544.197021484375, 57.05317687988281, -4897.49267578125),    -- 7. Marineford
+    CFrame.new(2897.0458984375, 83.3616943359375, -2853.43603515625)         -- 8. Business district
 }
 
 -- ==============================================================================
@@ -112,24 +112,8 @@ UserInputService.InputChanged:Connect(function(input)
 end)
 
 -- ==============================================================================
--- 3. LÓGICA DE DETECÇÃO E TELEPORTE DE ILHAS
+-- 3. LÓGICA DO FARM COM ROTAÇÃO FIXA E CONTROLE DE COOLDOWN
 -- ==============================================================================
-
--- Função para achar o objeto ou pasta da Ilha no Workspace
-local function FindIslandObject(islandName)
-    for _, v in pairs(workspace:GetChildren()) do
-        if string.find(string.lower(v.Name), string.lower(islandName)) then
-            return v
-        end
-    end
-    -- Procura secundária caso estejam dentro de uma pasta de Ilhas
-    for _, v in pairs(workspace:GetDescendants()) do
-        if (v:IsA("BasePart") or v:IsA("Model")) and string.find(string.lower(v.Name), string.lower(islandName)) then
-            return v
-        end
-    end
-    return nil
-end
 
 local function GetClosestChest()
     local Character = LocalPlayer.Character
@@ -143,8 +127,8 @@ local function GetClosestChest()
         if obj:IsA("BasePart") and string.find(string.lower(obj.Name), "chest") then
             if not BlacklistedChests[obj] then
                 local distance = (obj.Position - RootPart.Position).Magnitude
-                -- Apenas pega baús que estão perto (na mesma ilha carregada)
-                if distance < shortestDistance and distance < 3500 then
+                -- Raio limite baseado no tamanho médio de uma ilha grande (1500 studs)
+                if distance < shortestDistance and distance < 1500 then
                     shortestDistance = distance
                     closestChest = obj
                 end
@@ -154,67 +138,63 @@ local function GetClosestChest()
     return closestChest
 end
 
--- Loop principal baseado em Rota de Ilhas
 local function FarmLoop()
     while ChestFarmActive do
-        for _, islandName in ipairs(IslandNames) do
+        for index, islandCFrame in ipairs(IslandPositions) do
             if not ChestFarmActive then break end
             
-            local islandObj = FindIslandObject(islandName)
             local Character = LocalPlayer.Character
             local RootPart = Character and Character:FindFirstChild("HumanoidRootPart")
             
-            if RootPart and islandObj then
-                -- Define a posição da ilha (seja ela um Bloco ou um Modelo)
-                local islandCFrame = nil
-                if islandObj:IsA("BasePart") then
-                    islandCFrame = islandObj.CFrame
-                elseif islandObj:IsA("Model") then
-                    islandCFrame = islandObj:GetPivot()
-                end
+            if RootPart then
+                -- Marca o tempo exato de entrada na ilha
+                local islandStartTime = tick()
                 
-                if islandCFrame then
-                    -- 1. Teleporta para a ilha (coloca 30 studs acima para segurança contra colisões)
-                    RootPart.CFrame = islandCFrame * CFrame.new(0, 30, 0)
+                -- 1. Teleporte instantâneo para a coordenada exata fornecida
+                RootPart.CFrame = islandCFrame
+                
+                -- 2. Aguarda um momento inicial para renderização da ilha
+                task.wait(1.5)
+                
+                -- 3. Loop de puxar baús locais na ilha atual
+                local searchingChests = true
+                while searchingChests and ChestFarmActive do
+                    local targetChest = GetClosestChest()
                     
-                    -- 2. ESPERA CRÍTICA: Aguarda as partes da ilha carregarem no PC (Bypass StreamingEnabled)
-                    task.wait(1.5)
-                    
-                    -- 3. Puxa todos os baús disponíveis nesta ilha antes de ir para a próxima
-                    local searchingChests = true
-                    while searchingChests and ChestFarmActive do
-                        local targetChest = GetClosestChest()
+                    if targetChest then
+                        -- Puxa localmente
+                        targetChest.CFrame = RootPart.CFrame
                         
-                        if targetChest then
-                            -- Traz o baú até o jogador localmente
-                            targetChest.CFrame = RootPart.CFrame
-                            
-                            -- Coleta instantânea
-                            pcall(function()
-                                if firetouchinterest then
-                                    firetouchinterest(RootPart, targetChest, 0)
-                                    firetouchinterest(RootPart, targetChest, 1)
-                                end
-                            end)
-                            pcall(function()
-                                local prompt = targetChest:FindFirstChildWhichIsA("ProximityPrompt", true)
-                                if prompt and fireproximityprompt then
-                                    fireproximityprompt(prompt)
-                                end
-                            end)
-                            
-                            BlacklistedChests[targetChest] = true
-                            task.wait(0.1) -- Delay rápido entre baús da mesma ilha
-                        else
-                            -- Se não achar mais nenhum baú perto, sai do loop desta ilha
-                            searchingChests = false
-                        end
+                        -- Coletas nativas e remotas simultâneas
+                        pcall(function()
+                            if firetouchinterest then
+                                firetouchinterest(RootPart, targetChest, 0)
+                                firetouchinterest(RootPart, targetChest, 1)
+                            end
+                        end)
+                        pcall(function()
+                            local prompt = targetChest:FindFirstChildWhichIsA("ProximityPrompt", true)
+                            if prompt and fireproximityprompt then
+                                fireproximityprompt(prompt)
+                            end
+                        end)
+                        
+                        BlacklistedChests[targetChest] = true
+                        task.wait(0.1)
+                    else
+                        searchingChests = false
                     end
                 end
+                
+                -- 4. CONTROLE DE COOLDOWN SEGURO (Mínimo de 8 segundos por ilha)
+                local timeSpentOnIsland = tick() - islandStartTime
+                if timeSpentOnIsland < 8 then
+                    -- Calcula o tempo restante para completar os 8 segundos e aguarda
+                    task.wait(8 - timeSpentOnIsland)
+                end
             end
-            task.wait(0.5) -- Pequena pausa antes de saltar para a próxima ilha
         end
-        -- Uma vez que passou por todas as 8 ilhas, limpa a blacklist para a próxima rodada (respawn)
+        -- Reset da blacklist após passar pelas 8 ilhas para permitir coletar o respawn
         BlacklistedChests = {}
         task.wait(2)
     end
