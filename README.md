@@ -1,6 +1,6 @@
 -- ==============================================================================
--- [PREMIUM CHEST FARM] - VERSÃO COORDENADAS EXATAS & COOLDOWN
--- Totalmente compatível com VOLT. Rotação controlada por tempo mínimo (8s).
+-- [PREMIUM CHEST FARM] - VERSÃO DEFINITIVA (UI ANIMADA + HOTKEY)
+-- Compatível com VOLT. Rotação controlada, Cooldown (8s) e UI Premium.
 -- ==============================================================================
 
 local Players = game:GetService("Players")
@@ -11,6 +11,9 @@ local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 local ChestFarmActive = false
 local BlacklistedChests = {}
+
+-- Configuração da Tecla de Atalho (Esconder/Mostrar UI)
+local TOGGLE_KEY = Enum.KeyCode.RightControl
 
 -- Coordenadas exatas fornecidas para cada uma das 8 ilhas
 local IslandPositions = {
@@ -36,10 +39,13 @@ if not success then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 300, 0, 150)
-MainFrame.Position = UDim2.new(0.5, -150, 0.5, -75)
+-- AnchorPoint centralizado para a animação de zoom sair do meio
+MainFrame.AnchorPoint = Vector2.new(0.5, 0.5) 
+MainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+MainFrame.Size = UDim2.new(0, 0, 0, 0) -- Começa invisível/tamanho zero para animar
 MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 MainFrame.BorderSizePixel = 0
+MainFrame.ClipsDescendants = true -- Fundamental para o sistema de minimizar
 MainFrame.Parent = ScreenGui
 
 local MainCorner = Instance.new("UICorner")
@@ -61,6 +67,18 @@ TitleLabel.Font = Enum.Font.GothamBold
 TitleLabel.TextSize = 18
 TitleLabel.Parent = MainFrame
 
+-- Botão de Minimizar
+local MinimizeBtn = Instance.new("TextButton")
+MinimizeBtn.Name = "MinimizeBtn"
+MinimizeBtn.Size = UDim2.new(0, 30, 0, 30)
+MinimizeBtn.Position = UDim2.new(1, -35, 0, 5)
+MinimizeBtn.BackgroundTransparency = 1
+MinimizeBtn.Text = "-"
+MinimizeBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+MinimizeBtn.Font = Enum.Font.GothamBold
+MinimizeBtn.TextSize = 22
+MinimizeBtn.Parent = MainFrame
+
 local ToggleButton = Instance.new("TextButton")
 ToggleButton.Name = "ToggleButton"
 ToggleButton.Size = UDim2.new(0, 200, 0, 45)
@@ -77,154 +95,11 @@ local ButtonCorner = Instance.new("UICorner")
 ButtonCorner.CornerRadius = UDim.new(0, 8)
 ButtonCorner.Parent = ToggleButton
 
--- ==============================================================================
--- 2. SISTEMA DE ARRASTE (DRAGGABLE)
--- ==============================================================================
-local dragging = false
-local dragInput, dragStart, startPos
-
-MainFrame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        dragStart = input.Position
-        startPos = MainFrame.Position
-        
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                dragging = false
-            end
-        end)
-    end
-end)
-
-MainFrame.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-        dragInput = input
-    end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-    if input == dragInput and dragging then
-        local delta = input.Position - dragStart
-        local targetPos = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-        TweenService:Create(MainFrame, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Position = targetPos}):Play()
-    end
-end)
-
--- ==============================================================================
--- 3. LÓGICA DO FARM COM ROTAÇÃO FIXA E CONTROLE DE COOLDOWN
--- ==============================================================================
-
-local function GetClosestChest()
-    local Character = LocalPlayer.Character
-    if not Character or not Character:FindFirstChild("HumanoidRootPart") then return nil end
-    local RootPart = Character.HumanoidRootPart
-
-    local closestChest = nil
-    local shortestDistance = math.huge
-
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") and string.find(string.lower(obj.Name), "chest") then
-            if not BlacklistedChests[obj] then
-                local distance = (obj.Position - RootPart.Position).Magnitude
-                -- Raio limite baseado no tamanho médio de uma ilha grande (1500 studs)
-                if distance < shortestDistance and distance < 1500 then
-                    shortestDistance = distance
-                    closestChest = obj
-                end
-            end
-        end
-    end
-    return closestChest
-end
-
-local function FarmLoop()
-    while ChestFarmActive do
-        for index, islandCFrame in ipairs(IslandPositions) do
-            if not ChestFarmActive then break end
-            
-            local Character = LocalPlayer.Character
-            local RootPart = Character and Character:FindFirstChild("HumanoidRootPart")
-            
-            if RootPart then
-                -- Marca o tempo exato de entrada na ilha
-                local islandStartTime = tick()
-                
-                -- 1. Teleporte instantâneo para a coordenada exata fornecida
-                RootPart.CFrame = islandCFrame
-                
-                -- 2. Aguarda um momento inicial para renderização da ilha
-                task.wait(1.5)
-                
-                -- 3. Loop de puxar baús locais na ilha atual
-                local searchingChests = true
-                while searchingChests and ChestFarmActive do
-                    local targetChest = GetClosestChest()
-                    
-                    if targetChest then
-                        -- Puxa localmente
-                        targetChest.CFrame = RootPart.CFrame
-                        
-                        -- Coletas nativas e remotas simultâneas
-                        pcall(function()
-                            if firetouchinterest then
-                                firetouchinterest(RootPart, targetChest, 0)
-                                firetouchinterest(RootPart, targetChest, 1)
-                            end
-                        end)
-                        pcall(function()
-                            local prompt = targetChest:FindFirstChildWhichIsA("ProximityPrompt", true)
-                            if prompt and fireproximityprompt then
-                                fireproximityprompt(prompt)
-                            end
-                        end)
-                        
-                        BlacklistedChests[targetChest] = true
-                        task.wait(0.1)
-                    else
-                        searchingChests = false
-                    end
-                end
-                
-                -- 4. CONTROLE DE COOLDOWN SEGURO (Mínimo de 8 segundos por ilha)
-                local timeSpentOnIsland = tick() - islandStartTime
-                if timeSpentOnIsland < 8 then
-                    -- Calcula o tempo restante para completar os 8 segundos e aguarda
-                    task.wait(8 - timeSpentOnIsland)
-                end
-            end
-        end
-        -- Reset da blacklist após passar pelas 8 ilhas para permitir coletar o respawn
-        BlacklistedChests = {}
-        task.wait(2)
-    end
-end
-
--- ==============================================================================
--- 4. CONTROLE DO BOTÃO
--- ==============================================================================
-local function AnimateButton(isHovering)
-    if ChestFarmActive then return end
-    local color = isHovering and Color3.fromRGB(240, 80, 80) or Color3.fromRGB(230, 60, 60)
-    TweenService:Create(ToggleButton, TweenInfo.new(0.2), {BackgroundColor3 = color}):Play()
-end
-
-ToggleButton.MouseEnter:Connect(function() AnimateButton(true) end)
-ToggleButton.MouseLeave:Connect(function() AnimateButton(false) end)
-
-ToggleButton.Activated:Connect(function()
-    ChestFarmActive = not ChestFarmActive
-
-    local targetColor = ChestFarmActive and Color3.fromRGB(60, 200, 100) or Color3.fromRGB(230, 60, 60)
-    local targetText = ChestFarmActive and "Chest Farm: ON" or "Chest Farm: OFF"
-    
-    TweenService:Create(ToggleButton, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-        BackgroundColor3 = targetColor
-    }):Play()
-    ToggleButton.Text = targetText
-
-    if ChestFarmActive then
-        BlacklistedChests = {}
-        coroutine.wrap(FarmLoop)()
-    end
-end)
+-- Dica de Atalho (Aparece embaixo do botão)
+local HintLabel = Instance.new("TextLabel")
+HintLabel.Name = "HintLabel"
+HintLabel.Size = UDim2.new(1, 0, 0, 20)
+HintLabel.Position = UDim2.new(0, 0, 1, -25)
+HintLabel.BackgroundTransparency = 1
+HintLabel.Text = "Aperte 'RightControl' para esconder a UI"
+HintLabel.TextColor3 = Color3.fromRGB(150, 150,
