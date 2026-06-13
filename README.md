@@ -102,4 +102,171 @@ HintLabel.Size = UDim2.new(1, 0, 0, 20)
 HintLabel.Position = UDim2.new(0, 0, 1, -25)
 HintLabel.BackgroundTransparency = 1
 HintLabel.Text = "Aperte 'RightControl' para esconder a UI"
-HintLabel.TextColor3 = Color3.fromRGB(150, 150,
+HintLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+HintLabel.Font = Enum.Font.Gotham
+HintLabel.TextSize = 11
+HintLabel.Parent = MainFrame
+
+-- ==============================================================================
+-- 2. SISTEMA DE ARRASTE, ANIMAÇÕES E HOTKEY
+-- ==============================================================================
+local dragging = false
+local dragInput, dragStart, startPos
+
+-- Arrastar pela barra de título
+TitleLabel.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+        
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+    
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        local targetPos = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        TweenService:Create(MainFrame, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Position = targetPos}):Play()
+    end
+end)
+
+-- Sistema de Minimizar
+local isMinimized = false
+MinimizeBtn.Activated:Connect(function()
+    isMinimized = not isMinimized
+    local targetSize = isMinimized and UDim2.new(0, 300, 0, 40) or UDim2.new(0, 300, 0, 150)
+    
+    TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = targetSize}):Play()
+end)
+
+-- Sistema de Hotkey (Esconder tudo)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not gameProcessed and input.KeyCode == TOGGLE_KEY then
+        ScreenGui.Enabled = not ScreenGui.Enabled
+    end
+end)
+
+-- ANIMAÇÃO DE ENTRADA AO ABRIR O SCRIPT
+TweenService:Create(MainFrame, TweenInfo.new(0.6, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+    Size = UDim2.new(0, 300, 0, 150)
+}):Play()
+
+-- ==============================================================================
+-- 3. LÓGICA DO FARM COM ROTAÇÃO FIXA E CONTROLE DE COOLDOWN
+-- ==============================================================================
+
+local function GetClosestChest()
+    local Character = LocalPlayer.Character
+    if not Character or not Character:FindFirstChild("HumanoidRootPart") then return nil end
+    local RootPart = Character.HumanoidRootPart
+
+    local closestChest = nil
+    local shortestDistance = math.huge
+
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart") and string.find(string.lower(obj.Name), "chest") then
+            if not BlacklistedChests[obj] then
+                local distance = (obj.Position - RootPart.Position).Magnitude
+                if distance < shortestDistance and distance < 1500 then
+                    shortestDistance = distance
+                    closestChest = obj
+                end
+            end
+        end
+    end
+    return closestChest
+end
+
+local function FarmLoop()
+    while ChestFarmActive do
+        for index, islandCFrame in ipairs(IslandPositions) do
+            if not ChestFarmActive then break end
+            
+            local Character = LocalPlayer.Character
+            local RootPart = Character and Character:FindFirstChild("HumanoidRootPart")
+            
+            if RootPart then
+                local islandStartTime = tick()
+                
+                -- Teleporte e aguarda carregar mapa
+                RootPart.CFrame = islandCFrame
+                task.wait(1.5)
+                
+                -- Coleta os baús
+                local searchingChests = true
+                while searchingChests and ChestFarmActive do
+                    local targetChest = GetClosestChest()
+                    
+                    if targetChest then
+                        targetChest.CFrame = RootPart.CFrame
+                        
+                        pcall(function()
+                            if firetouchinterest then
+                                firetouchinterest(RootPart, targetChest, 0)
+                                firetouchinterest(RootPart, targetChest, 1)
+                            end
+                        end)
+                        pcall(function()
+                            local prompt = targetChest:FindFirstChildWhichIsA("ProximityPrompt", true)
+                            if prompt and fireproximityprompt then
+                                fireproximityprompt(prompt)
+                            end
+                        end)
+                        
+                        BlacklistedChests[targetChest] = true
+                        task.wait(0.1)
+                    else
+                        searchingChests = false
+                    end
+                end
+                
+                -- Controle de Cooldown (Mínimo de 8s)
+                local timeSpentOnIsland = tick() - islandStartTime
+                if timeSpentOnIsland < 8 then
+                    task.wait(8 - timeSpentOnIsland)
+                end
+            end
+        end
+        BlacklistedChests = {}
+        task.wait(2)
+    end
+end
+
+-- ==============================================================================
+-- 4. CONTROLE DO BOTÃO
+-- ==============================================================================
+local function AnimateButton(isHovering)
+    if ChestFarmActive then return end
+    local color = isHovering and Color3.fromRGB(240, 80, 80) or Color3.fromRGB(230, 60, 60)
+    TweenService:Create(ToggleButton, TweenInfo.new(0.2), {BackgroundColor3 = color}):Play()
+end
+
+ToggleButton.MouseEnter:Connect(function() AnimateButton(true) end)
+ToggleButton.MouseLeave:Connect(function() AnimateButton(false) end)
+
+ToggleButton.Activated:Connect(function()
+    ChestFarmActive = not ChestFarmActive
+
+    local targetColor = ChestFarmActive and Color3.fromRGB(60, 200, 100) or Color3.fromRGB(230, 60, 60)
+    local targetText = ChestFarmActive and "Chest Farm: ON" or "Chest Farm: OFF"
+    
+    TweenService:Create(ToggleButton, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        BackgroundColor3 = targetColor
+    }):Play()
+    ToggleButton.Text = targetText
+
+    if ChestFarmActive then
+        BlacklistedChests = {}
+        coroutine.wrap(FarmLoop)()
+    end
+end)
