@@ -1,6 +1,6 @@
 -- ==============================================================================
--- [PREMIUM CHEST FARM] - VERSÃO STAND-STILL (SEM MOVIMENTO)
--- Traz os baús até o jogador localmente para evitar teleporte visível.
+-- [PREMIUM CHEST FARM] - VERSÃO MULTI-ILHAS (STREAMING BYPASS)
+-- Compatível com VOLT. Rotação automática pelas 8 ilhas com puxador local.
 -- ==============================================================================
 
 local Players = game:GetService("Players")
@@ -12,12 +12,25 @@ local LocalPlayer = Players.LocalPlayer
 local ChestFarmActive = false
 local BlacklistedChests = {}
 
+-- Lista exata das ilhas fornecidas
+local IslandNames = {
+    "Starter",
+    "Forest",
+    "Rocky",
+    "Desert",
+    "Ice",
+    "Sky kingdom",
+    "Marineford",
+    "Business district"
+}
+
 -- ==============================================================================
 -- 1. CRIAÇÃO DA INTERFACE GRÁFICA (UI)
 -- ==============================================================================
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "PremiumChestFarmGui"
 ScreenGui.ResetOnSpawn = false
+
 local success = pcall(function() ScreenGui.Parent = game.CoreGui end)
 if not success then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
@@ -42,7 +55,7 @@ local TitleLabel = Instance.new("TextLabel")
 TitleLabel.Name = "TitleLabel"
 TitleLabel.Size = UDim2.new(1, 0, 0, 40)
 TitleLabel.BackgroundTransparency = 1
-TitleLabel.Text = "✧ Stealth Chest Farm ✧"
+TitleLabel.Text = "✧ Island Master Farm ✧"
 TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 TitleLabel.Font = Enum.Font.GothamBold
 TitleLabel.TextSize = 18
@@ -99,8 +112,24 @@ UserInputService.InputChanged:Connect(function(input)
 end)
 
 -- ==============================================================================
--- 3. LÓGICA DO CHEST FARM (PUXAR BAÚS / STEALTH)
+-- 3. LÓGICA DE DETECÇÃO E TELEPORTE DE ILHAS
 -- ==============================================================================
+
+-- Função para achar o objeto ou pasta da Ilha no Workspace
+local function FindIslandObject(islandName)
+    for _, v in pairs(workspace:GetChildren()) do
+        if string.find(string.lower(v.Name), string.lower(islandName)) then
+            return v
+        end
+    end
+    -- Procura secundária caso estejam dentro de uma pasta de Ilhas
+    for _, v in pairs(workspace:GetDescendants()) do
+        if (v:IsA("BasePart") or v:IsA("Model")) and string.find(string.lower(v.Name), string.lower(islandName)) then
+            return v
+        end
+    end
+    return nil
+end
 
 local function GetClosestChest()
     local Character = LocalPlayer.Character
@@ -114,56 +143,80 @@ local function GetClosestChest()
         if obj:IsA("BasePart") and string.find(string.lower(obj.Name), "chest") then
             if not BlacklistedChests[obj] then
                 local distance = (obj.Position - RootPart.Position).Magnitude
-                if distance < shortestDistance then
+                -- Apenas pega baús que estão perto (na mesma ilha carregada)
+                if distance < shortestDistance and distance < 3500 then
                     shortestDistance = distance
                     closestChest = obj
                 end
             end
         end
     end
-
     return closestChest
 end
 
+-- Loop principal baseado em Rota de Ilhas
 local function FarmLoop()
     while ChestFarmActive do
-        local Character = LocalPlayer.Character
-        local Humanoid = Character and Character:FindFirstChild("Humanoid")
-        local RootPart = Character and Character:FindFirstChild("HumanoidRootPart")
-
-        if Character and Humanoid and RootPart and Humanoid.Health > 0 then
-            local targetChest = GetClosestChest()
-
-            if targetChest then
-                -- 1. Traz o baú até o jogador (Localmente)
-                -- Os outros jogadores não verão o baú se movendo, apenas você.
-                targetChest.CFrame = RootPart.CFrame
+        for _, islandName in ipairs(IslandNames) do
+            if not ChestFarmActive then break end
+            
+            local islandObj = FindIslandObject(islandName)
+            local Character = LocalPlayer.Character
+            local RootPart = Character and Character:FindFirstChild("HumanoidRootPart")
+            
+            if RootPart and islandObj then
+                -- Define a posição da ilha (seja ela um Bloco ou um Modelo)
+                local islandCFrame = nil
+                if islandObj:IsA("BasePart") then
+                    islandCFrame = islandObj.CFrame
+                elseif islandObj:IsA("Model") then
+                    islandCFrame = islandObj:GetPivot()
+                end
                 
-                -- 2. Tenta coletar o baú que agora está dentro do personagem
-                pcall(function()
-                    if firetouchinterest then
-                        firetouchinterest(RootPart, targetChest, 0)
-                        firetouchinterest(RootPart, targetChest, 1)
+                if islandCFrame then
+                    -- 1. Teleporta para a ilha (coloca 30 studs acima para segurança contra colisões)
+                    RootPart.CFrame = islandCFrame * CFrame.new(0, 30, 0)
+                    
+                    -- 2. ESPERA CRÍTICA: Aguarda as partes da ilha carregarem no PC (Bypass StreamingEnabled)
+                    task.wait(1.5)
+                    
+                    -- 3. Puxa todos os baús disponíveis nesta ilha antes de ir para a próxima
+                    local searchingChests = true
+                    while searchingChests and ChestFarmActive do
+                        local targetChest = GetClosestChest()
+                        
+                        if targetChest then
+                            -- Traz o baú até o jogador localmente
+                            targetChest.CFrame = RootPart.CFrame
+                            
+                            -- Coleta instantânea
+                            pcall(function()
+                                if firetouchinterest then
+                                    firetouchinterest(RootPart, targetChest, 0)
+                                    firetouchinterest(RootPart, targetChest, 1)
+                                end
+                            end)
+                            pcall(function()
+                                local prompt = targetChest:FindFirstChildWhichIsA("ProximityPrompt", true)
+                                if prompt and fireproximityprompt then
+                                    fireproximityprompt(prompt)
+                                end
+                            end)
+                            
+                            BlacklistedChests[targetChest] = true
+                            task.wait(0.1) -- Delay rápido entre baús da mesma ilha
+                        else
+                            -- Se não achar mais nenhum baú perto, sai do loop desta ilha
+                            searchingChests = false
+                        end
                     end
-                end)
-
-                pcall(function()
-                    local prompt = targetChest:FindFirstChildWhichIsA("ProximityPrompt", true)
-                    if prompt and fireproximityprompt then
-                        fireproximityprompt(prompt)
-                    end
-                end)
-
-                -- 3. Adiciona à Blacklist e aguarda uma fração de segundo
-                BlacklistedChests[targetChest] = true
-                task.wait(0.1) 
-            else
-                BlacklistedChests = {}
-                task.wait(1)
+                end
             end
-        else
-            task.wait(0.5)
+            task.wait(0.5) -- Pequena pausa antes de saltar para a próxima ilha
         end
+        -- Uma vez que passou por todas as 8 ilhas, limpa a blacklist para a próxima rodada (respawn)
+        BlacklistedChests = {}
+        task.wait(2)
     end
 end
 
