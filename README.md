@@ -1,5 +1,6 @@
 -- ==============================================================================
--- [PREMIUM CHEST FARM UI & SCRIPT] - VERSÃO INSTANTÂNEA / TELEPORTE
+-- [PREMIUM CHEST FARM] - VERSÃO STAND-STILL (SEM MOVIMENTO)
+-- Traz os baús até o jogador localmente para evitar teleporte visível.
 -- ==============================================================================
 
 local Players = game:GetService("Players")
@@ -9,6 +10,7 @@ local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 local ChestFarmActive = false
+local BlacklistedChests = {}
 
 -- ==============================================================================
 -- 1. CRIAÇÃO DA INTERFACE GRÁFICA (UI)
@@ -16,7 +18,8 @@ local ChestFarmActive = false
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "PremiumChestFarmGui"
 ScreenGui.ResetOnSpawn = false
-ScreenGui.Parent = game.CoreGui or LocalPlayer:WaitForChild("PlayerGui")
+local success = pcall(function() ScreenGui.Parent = game.CoreGui end)
+if not success then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
@@ -39,7 +42,7 @@ local TitleLabel = Instance.new("TextLabel")
 TitleLabel.Name = "TitleLabel"
 TitleLabel.Size = UDim2.new(1, 0, 0, 40)
 TitleLabel.BackgroundTransparency = 1
-TitleLabel.Text = "✧ Fast Chest Farm ✧"
+TitleLabel.Text = "✧ Stealth Chest Farm ✧"
 TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 TitleLabel.Font = Enum.Font.GothamBold
 TitleLabel.TextSize = 18
@@ -96,7 +99,7 @@ UserInputService.InputChanged:Connect(function(input)
 end)
 
 -- ==============================================================================
--- 3. LÓGICA DO CHEST FARM (TELEPORTE INSTANTÂNEO)
+-- 3. LÓGICA DO CHEST FARM (PUXAR BAÚS / STEALTH)
 -- ==============================================================================
 
 local function GetClosestChest()
@@ -108,11 +111,13 @@ local function GetClosestChest()
     local shortestDistance = math.huge
 
     for _, obj in pairs(workspace:GetDescendants()) do
-        if obj.Name == "Chest" and obj:IsA("BasePart") then
-            local distance = (obj.Position - RootPart.Position).Magnitude
-            if distance < shortestDistance then
-                shortestDistance = distance
-                closestChest = obj
+        if obj:IsA("BasePart") and string.find(string.lower(obj.Name), "chest") then
+            if not BlacklistedChests[obj] then
+                local distance = (obj.Position - RootPart.Position).Magnitude
+                if distance < shortestDistance then
+                    shortestDistance = distance
+                    closestChest = obj
+                end
             end
         end
     end
@@ -130,11 +135,11 @@ local function FarmLoop()
             local targetChest = GetClosestChest()
 
             if targetChest then
-                -- 1. Teleporte instantâneo para o baú (com um pequeno ajuste de altura para não bugar no chão)
-                RootPart.CFrame = targetChest.CFrame * CFrame.new(0, 1, 0)
+                -- 1. Traz o baú até o jogador (Localmente)
+                -- Os outros jogadores não verão o baú se movendo, apenas você.
+                targetChest.CFrame = RootPart.CFrame
                 
-                -- 2. Tenta coletar o baú remotamente (bypass de tempo)
-                -- Se o baú for de encostar (Touch):
+                -- 2. Tenta coletar o baú que agora está dentro do personagem
                 pcall(function()
                     if firetouchinterest then
                         firetouchinterest(RootPart, targetChest, 0)
@@ -142,7 +147,6 @@ local function FarmLoop()
                     end
                 end)
 
-                -- Se o baú usar o sistema de segurar tecla (ProximityPrompt):
                 pcall(function()
                     local prompt = targetChest:FindFirstChildWhichIsA("ProximityPrompt", true)
                     if prompt and fireproximityprompt then
@@ -150,10 +154,12 @@ local function FarmLoop()
                     end
                 end)
 
-                -- Aguarda uma fração de segundo para o servidor registrar a coleta e o baú sumir
+                -- 3. Adiciona à Blacklist e aguarda uma fração de segundo
+                BlacklistedChests[targetChest] = true
                 task.wait(0.1) 
             else
-                task.wait(0.5) -- Se não achar baú, procura de novo em meio segundo
+                BlacklistedChests = {}
+                task.wait(1)
             end
         else
             task.wait(0.5)
@@ -173,7 +179,7 @@ end
 ToggleButton.MouseEnter:Connect(function() AnimateButton(true) end)
 ToggleButton.MouseLeave:Connect(function() AnimateButton(false) end)
 
-ToggleButton.MouseButton1Click:Connect(function()
+ToggleButton.Activated:Connect(function()
     ChestFarmActive = not ChestFarmActive
 
     local targetColor = ChestFarmActive and Color3.fromRGB(60, 200, 100) or Color3.fromRGB(230, 60, 60)
@@ -185,6 +191,7 @@ ToggleButton.MouseButton1Click:Connect(function()
     ToggleButton.Text = targetText
 
     if ChestFarmActive then
-        task.spawn(FarmLoop)
+        BlacklistedChests = {}
+        coroutine.wrap(FarmLoop)()
     end
 end)
